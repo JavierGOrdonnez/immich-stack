@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   immich-stack:
     container_name: immich_stack
@@ -19,6 +17,7 @@ services:
       - WITH_DELETED=${WITH_DELETED:-false}
       - RUN_MODE=${RUN_MODE:-once}
       - CRON_INTERVAL=${CRON_INTERVAL:-86400}
+      - CRITERIA=${CRITERIA}
     volumes:
       - ./logs:/app/logs
     restart: on-failure
