@@ -10,10 +10,12 @@ API_KEY=your_immich_api_key
 API_URL=http://immich-server:2283/api
 RUN_MODE=cron
 CRON_INTERVAL=60
+# Optional: Enable file logging for persistent logs
+# LOG_FILE=/app/logs/immich-stack.log
 EOL
 ```
 
-2. Run with Docker (using Docker Hub):
+1. Run with Docker (using Docker Hub):
 
 ```bash
 docker run -d --name immich-stack --env-file .env -v ./logs:/app/logs majorfi/immich-stack:latest
@@ -34,7 +36,7 @@ API_KEY=your_immich_api_key
 API_URL=http://your_immich_server:3001/api
 ```
 
-2. Run the stacker:
+1. Run the stacker:
 
 ```sh
 # Using the binary
@@ -70,7 +72,7 @@ immich-stack fix-trash --dry-run  # Preview first
 immich-stack fix-trash             # Execute
 ```
 
-3. Optional: Configure additional options via environment variables or flags:
+1. Optional: Configure additional options via environment variables or flags:
 
 ```sh
 # Example with flags

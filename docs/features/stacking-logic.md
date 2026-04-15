@@ -116,14 +116,14 @@ The system can detect various sequence patterns when using comma-separated numbe
 ## Stacking Process
 
 1. **Fetch all stacks and assets** from Immich
-2. **Determine grouping mode** based on `CRITERIA` configuration:
+1. **Determine grouping mode** based on `CRITERIA` configuration:
    - **Legacy Mode:** Apply simple AND logic to array of criteria
    - **Groups Mode:** Process each criteria group with configured AND/OR logic
    - **Expression Mode:** Recursively evaluate nested logical expressions
-3. **Group assets** into stacks using the selected mode and criteria
-4. **Sort each stack** to determine the parent and children using promotion rules
-5. **Apply changes** via the Immich API (create, update, or delete stacks as needed)
-6. **Log all actions** and optionally run in dry-run mode for safety
+1. **Group assets** into stacks using the selected mode and criteria
+1. **Sort each stack** to determine the parent and children using promotion rules
+1. **Apply changes** via the Immich API (create, update, or delete stacks as needed)
+1. **Log all actions** and optionally run in dry-run mode for safety
 
 ## Safe Operations
 
@@ -131,8 +131,209 @@ The stacker includes several safety features:
 
 - **Dry Run Mode:** Use `--dry-run` or `DRY_RUN=true` to simulate actions without making changes
 - **Stack Replacement:** Use `--replace-stacks` or `REPLACE_STACKS=true` to replace existing stacks
-- **Stack Reset:** Use `--reset-stacks` or `RESET_STACKS=true` with confirmation to delete all stacks
+- **Stack Reset:** Use `--reset-stacks` or `RESET_STACKS=true` with confirmation to delete all stacks (requires `RUN_MODE=once`)
 - **Confirmation Required:** Stack reset requires explicit confirmation via `CONFIRM_RESET_STACK`
+
+## Parent Selection Edge Cases
+
+### Multiple Promotion Rules
+
+When multiple promotion rules apply to different files in a group, the selection follows this strict precedence order:
+
+1. **PARENT_FILENAME_PROMOTE list order** (left to right)
+1. **PARENT_EXT_PROMOTE list order** (left to right)
+1. **Built-in extension rank** (`.jpeg` > `.jpg` > `.png` > others)
+1. **Alphabetical order** (case-insensitive)
+
+**Example with multiple matches**:
+
+Files: `IMG_1234_edited.jpg`, `IMG_1234_raw.dng`, `IMG_1234_edited.dng`
+
+With `PARENT_FILENAME_PROMOTE=edited,raw` and `PARENT_EXT_PROMOTE=.jpg,.dng`:
+
+```
+IMG_1234_edited.jpg  # Wins: "edited" matches first in filename list, .jpg matches first in ext list
+IMG_1234_edited.dng  # Second: "edited" matches first in filename list, .dng second in ext list
+IMG_1234_raw.dng     # Third: "raw" is second in filename list
+```
+
+### Sequence Keyword Behavior
+
+When multiple `sequence` keywords appear in the promote list, only the **first occurrence** is used. Additional sequence keywords are ignored.
+
+```sh
+# Only the first "sequence" is processed
+PARENT_FILENAME_PROMOTE=COVER,sequence,edited,sequence:4
+# Result: COVER files first, then all sequences, then "edited", then everything else
+```
+
+To use specific sequence patterns, place them strategically:
+
+```sh
+# Correct: specific pattern first, general sequence later
+PARENT_FILENAME_PROMOTE=sequence:IMG_,COVER,sequence
+
+# This orders IMG_ sequences first, then COVER files, then other sequences
+```
+
+### Mixed Case Filenames
+
+Filename matching is **case-insensitive** for promotion rules:
+
+```sh
+PARENT_FILENAME_PROMOTE=EDIT,HDR
+```
+
+This will match: `edit`, `Edit`, `EDIT`, `eDiT`, `hdr`, `HDR`, etc.
+
+However, alphabetical tie-breaking is also case-insensitive, so `IMG_123.jpg` and `img_123.jpg` sort together regardless of case.
+
+### Unicode and Special Characters
+
+- **Unicode characters** are supported in filename matching
+- **Special regex characters** in promote strings are treated as literals (no regex escaping needed)
+- **Whitespace** in filenames is preserved and matched exactly
+
+**Example**:
+
+```sh
+PARENT_FILENAME_PROMOTE=編集,★favorites,café
+```
+
+This will match files containing these exact Unicode strings.
+
+### Tie-Breaking Logic
+
+When two files have equal rank after all promotion rules, the final tie-breaker is:
+
+1. **Original filename** (alphabetically, case-insensitive)
+1. If filenames are identical: **Local date/time** (earliest first)
+1. If both are identical: **Asset ID** (lexicographic order)
+
+This ensures deterministic, reproducible parent selection across multiple runs.
+
+### Empty String Edge Cases
+
+When using empty string (`,`) for negative matching:
+
+```sh
+PARENT_FILENAME_PROMOTE=,_edited,_crop
+```
+
+A file matches the empty string rule if it contains **none** of the other non-empty substrings in the list:
+
+- `IMG_1234.jpg` → Matches empty string (no `_edited`, no `_crop`)
+- `IMG_1234_final.jpg` → Matches empty string (no `_edited`, no `_crop`)
+- `IMG_1234_edited.jpg` → Does NOT match empty string (contains `_edited`)
+- `IMG_1234_crop.jpg` → Does NOT match empty string (contains `_crop`)
+- `IMG_1234_edited_crop.jpg` → Does NOT match empty string (contains both)
+
+## Performance Implications
+
+### Expression Mode Complexity
+
+Expression mode with deep nesting can impact performance:
+
+| Nesting Level | Performance Impact | Recommendation                |
+| ------------- | ------------------ | ----------------------------- |
+| 1-2 levels    | Negligible         | Safe for all use cases        |
+| 3-4 levels    | Slight increase    | Acceptable for most libraries |
+| 5+ levels     | Noticeable impact  | Consider simplifying criteria |
+
+**Example of deep nesting**:
+
+```json
+{
+  "mode": "advanced",
+  "expression": {
+    "operator": "AND",
+    "children": [
+      {
+        "operator": "OR",
+        "children": [
+          {
+            "operator": "AND",
+            "children": [
+              {
+                "criteria": {
+                  "key": "originalFileName",
+                  "regex": { "key": "PXL_", "index": 0 }
+                }
+              },
+              {
+                "criteria": {
+                  "key": "localDateTime",
+                  "delta": { "milliseconds": 1000 }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+This has 3 levels of nesting. Each additional level multiplies the evaluation cost.
+
+### Memory Usage
+
+Memory usage scales with:
+
+1. **Asset count**: ~1KB per asset in memory
+1. **Criteria complexity**: Expression trees consume additional memory per evaluation
+1. **Stack size**: Larger stacks (more assets per group) increase memory overhead
+
+**Guidelines**:
+
+| Library Size          | Recommended Mode | Expected Memory |
+| --------------------- | ---------------- | --------------- |
+| < 10,000 assets       | Any mode         | < 100MB         |
+| 10,000-50,000 assets  | Legacy or Groups | 100-500MB       |
+| 50,000-100,000 assets | Legacy preferred | 500MB-1GB       |
+| > 100,000 assets      | Legacy only      | > 1GB           |
+
+For very large libraries (100k+ assets), consider:
+
+- Using simpler criteria (Legacy mode)
+- Processing in batches using `WITH_ARCHIVED` and `WITH_DELETED` filters
+- Running during off-peak hours
+
+### Regex Performance
+
+Regex-based criteria (`"regex": {"key": "..."}`) are evaluated for each asset. Complex regex patterns can slow processing:
+
+**Fast regex patterns**:
+
+```json
+{ "key": "PXL_", "index": 0 }          // Simple prefix match
+{ "key": "IMG_\\d{4}", "index": 0 }     // Simple digit pattern
+```
+
+**Slow regex patterns**:
+
+```json
+{ "key": ".*photo.*\\d+.*edited.*", "index": 0 }  // Multiple wildcards and backtracking
+{ "key": "(IMG|DSC|PXL)_\\d{4,6}_.*", "index": 0 } // Complex alternation
+```
+
+Optimize regex by:
+
+- Using anchors (`^`, `$`) when possible
+- Avoiding unnecessary wildcards (`.*`)
+- Using character classes instead of alternation when possible
+
+### Time Delta Performance
+
+Time-based criteria with small deltas create smaller, more numerous groups:
+
+```json
+{ "key": "localDateTime", "delta": { "milliseconds": 100 } }   // Very tight grouping, more groups
+{ "key": "localDateTime", "delta": { "milliseconds": 5000 } }  // Looser grouping, fewer groups
+```
+
+**Recommendation**: Use the largest delta that still achieves your grouping goals. 1000ms (1 second) is a good starting point for most burst photos.
 
 ## Logging
 

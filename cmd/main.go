@@ -30,7 +30,11 @@ func bindFlags(rootCmd *cobra.Command) {
 	rootCmd.PersistentFlags().StringVar(&runMode, "run-mode", os.Getenv("RUN_MODE"), "Run mode (or set RUN_MODE env var)")
 	rootCmd.PersistentFlags().IntVar(&cronInterval, "cron-interval", 0, "Cron interval (or set CRON_INTERVAL env var)")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "Log level: debug, info, warn, error (or set LOG_LEVEL env var)")
+	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "", "Log format: text, json (or set LOG_FORMAT env var)")
 	rootCmd.PersistentFlags().BoolVar(&removeSingleAssetStacks, "remove-single-asset-stacks", false, "Remove stacks with only one asset (or set REMOVE_SINGLE_ASSET_STACKS=true)")
+	rootCmd.PersistentFlags().StringSliceVar(&filterAlbumIDs, "filter-album-ids", nil, "Filter by album IDs or names, comma-separated (or set FILTER_ALBUM_IDS env var)")
+	rootCmd.PersistentFlags().StringVar(&filterTakenAfter, "filter-taken-after", "", "Filter assets taken after date, ISO 8601 (or set FILTER_TAKEN_AFTER env var)")
+	rootCmd.PersistentFlags().StringVar(&filterTakenBefore, "filter-taken-before", "", "Filter assets taken before date, ISO 8601 (or set FILTER_TAKEN_BEFORE env var)")
 }
 
 /**************************************************************************************************
@@ -51,8 +55,17 @@ func addSubcommands(rootCmd *cobra.Command) {
 		Run:   runFixTrash,
 	}
 
+	// var fixAlbumCmd = &cobra.Command{
+	// 	Use:   "fix-album [album name or ID]",
+	// 	Short: "Reorganize a single album for clean sharing",
+	// 	Long:  "Process a specific album to create an archived backup while keeping only JPG/primary photos in the original for clean sharing.",
+	// 	Args:  cobra.MinimumNArgs(1),
+	// 	Run:   runFixAlbum,
+	// }
+
 	rootCmd.AddCommand(duplicatesCmd)
 	rootCmd.AddCommand(fixTrashCmd)
+	// rootCmd.AddCommand(fixAlbumCmd)
 }
 
 /**************************************************************************************************
@@ -65,6 +78,11 @@ func CreateRootCommand() *cobra.Command {
 		Short: "Immich Stack CLI",
 		Long:  "A tool to automatically stack Immich assets.",
 		Run:   runStacker,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			if cmd.Flags().Lookup("replace-stacks") != nil && cmd.Flags().Lookup("replace-stacks").Changed {
+				replaceStacksFlagSet = true
+			}
+		},
 	}
 
 	bindFlags(rootCmd)

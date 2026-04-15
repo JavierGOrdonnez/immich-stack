@@ -49,7 +49,7 @@ immich-stack [command] [flags]
 
 | Flag                           | Env Var                      | Description                                                                                                                  |
 | ------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `--reset-stacks`               | `RESET_STACKS`               | Delete all existing stacks before processing                                                                                 |
+| `--reset-stacks`               | `RESET_STACKS`               | Delete all existing stacks before processing (only in `RUN_MODE=once`)                                                       |
 | `--confirm-reset-stack`        | `CONFIRM_RESET_STACK`        | Required for RESET_STACKS. Must be set to: 'I acknowledge all my current stacks will be deleted and new one will be created' |
 | `--replace-stacks`             | `REPLACE_STACKS`             | Replace stacks for new groups                                                                                                |
 | `--dry-run`                    | `DRY_RUN`                    | Simulate actions without making changes                                                                                      |
@@ -62,6 +62,9 @@ immich-stack [command] [flags]
 | `--cron-interval`              | `CRON_INTERVAL`              | Interval in seconds for cron mode                                                                                            |
 | `--log-level`                  | `LOG_LEVEL`                  | Log level: debug, info, warn, error                                                                                          |
 | `--remove-single-asset-stacks` | `REMOVE_SINGLE_ASSET_STACKS` | Remove stacks containing only one asset                                                                                      |
+| `--filter-album-ids`           | `FILTER_ALBUM_IDS`           | Filter by album IDs or names (comma-separated, OR logic)                                                                     |
+| `--filter-taken-after`         | `FILTER_TAKEN_AFTER`         | Only process assets taken after this date (ISO 8601)                                                                         |
+| `--filter-taken-before`        | `FILTER_TAKEN_BEFORE`        | Only process assets taken before this date (ISO 8601)                                                                        |
 
 ### Command-Specific Notes
 
@@ -135,11 +138,44 @@ immich-stack \
   --api-key your_key
 ```
 
+Note: `--reset-stacks` only works when `--run-mode` is `once` (or `RUN_MODE=once`).
+
 ### Remove Single-Asset Stacks
 
 ```sh
 immich-stack \
   --remove-single-asset-stacks \
+  --api-key your_key
+```
+
+### Asset Filtering
+
+```sh
+# Filter by album ID
+immich-stack \
+  --filter-album-ids 550e8400-e29b-41d4-a716-446655440000 \
+  --api-key your_key
+
+# Filter by album name
+immich-stack \
+  --filter-album-ids "Vacation Photos" \
+  --api-key your_key
+
+# Filter by multiple albums (OR logic)
+immich-stack \
+  --filter-album-ids "album-1,Vacation Photos,Family" \
+  --api-key your_key
+
+# Filter by date range
+immich-stack \
+  --filter-taken-after 2024-01-01T00:00:00Z \
+  --filter-taken-before 2024-12-31T23:59:59Z \
+  --api-key your_key
+
+# Combined: album and date filtering
+immich-stack \
+  --filter-album-ids "My Photos" \
+  --filter-taken-after 2024-06-01T00:00:00Z \
   --api-key your_key
 ```
 
