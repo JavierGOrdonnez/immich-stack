@@ -223,6 +223,73 @@ func TestExtractTimeWithDelta(t *testing.T) {
 	}
 }
 
+func TestDuplicateIdExtractorAndGrouping(t *testing.T) {
+	assetWithDuplicate := utils.TAsset{ID: "1", OriginalFileName: "a.jpg", DuplicateID: "dup-123", LocalDateTime: "2024-01-01T10:00:00Z"}
+	assetWithoutDuplicate := utils.TAsset{ID: "2", OriginalFileName: "b.jpg", LocalDateTime: "2024-01-01T10:00:00Z"}
+
+	value, err := extractors["duplicateId"](assetWithDuplicate, utils.TCriteria{Key: "duplicateId"})
+	require.NoError(t, err)
+	assert.Equal(t, "dup-123", value)
+
+	value, err = extractors["duplicateId"](assetWithoutDuplicate, utils.TCriteria{Key: "duplicateId"})
+	require.NoError(t, err)
+	assert.Empty(t, value)
+
+	groups, err := StackBy([]utils.TAsset{assetWithDuplicate, assetWithoutDuplicate}, `{"mode":"advanced","expression":{"operator":"AND","children":[{"criteria":{"key":"duplicateId"}},{"criteria":{"key":"localDateTime","delta":{"milliseconds":86400000}}}]}}`, "", "", logrus.New())
+	require.NoError(t, err)
+	assert.Len(t, groups, 0)
+}
+
+// defaultDuplicateCriteria is the production default CRITERIA: ALL time-based grouping
+// is gated on a real content-similarity signal (duplicateId). There must be no
+// time-only branch keyed on loose filename prefixes. See §V8p5.
+const defaultDuplicateCriteria = `{"mode":"advanced","expression":{"operator":"AND","children":[{"criteria":{"key":"duplicateId"}},{"criteria":{"key":"localDateTime","delta":{"milliseconds":86400000}}}]}}`
+
+/************************************************************************************************
+** TestV8p5_DissimilarForwardedNotStacked
+** Invariant §V8p5: a time-based grouping must be gated by a content signal (duplicateId).
+** Dissimilar photos that merely share a filename prefix and timestamp (e.g. a batch
+** forwarded together) must NOT be stacked. Photos that consume the same duplicateId
+** within 24h MUST be stacked.
+************************************************************************************************/
+func TestV8p5_DissimilarForwardedNotStacked(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+
+	newDefault := defaultDuplicateCriteria
+
+	// The loose BROKEN default (prior to the fix) — an OR with a filename-prefix + 7s
+	// branch that has no content-similarity gate. Reproduces the reported bug.
+	oldBrokenDefault := `{"mode":"advanced","expression":{"operator":"OR","children":[{"operator":"AND","children":[{"criteria":{"key":"originalFileName","regex":{"key":"^(.+?)_\\d+\\.","index":1}}},{"criteria":{"key":"localDateTime","delta":{"milliseconds":7000}}}]},{"operator":"AND","children":[{"criteria":{"key":"duplicateId"}},{"criteria":{"key":"localDateTime","delta":{"milliseconds":86400000}}}]}]}}`
+
+	dissimilarForwarded := []utils.TAsset{
+		{ID: "1", OriginalFileName: "photo_1.jpg", LocalDateTime: "2024-01-01T10:00:01Z", DuplicateID: ""},
+		{ID: "2", OriginalFileName: "photo_2.jpg", LocalDateTime: "2024-01-01T10:00:02Z", DuplicateID: ""},
+		{ID: "3", OriginalFileName: "photo_3.jpg", LocalDateTime: "2024-01-01T10:00:03Z", DuplicateID: ""},
+		{ID: "4", OriginalFileName: "photo_4.jpg", LocalDateTime: "2024-01-01T10:00:04Z", DuplicateID: ""},
+	}
+
+	// The reported bug: under the old default these dissimilar photos collide because
+	// they share the filename base and were received together.
+	brokenGroups, err := StackBy(dissimilarForwarded, oldBrokenDefault, "", "", logger)
+	require.NoError(t, err)
+	assert.NotZero(t, len(brokenGroups), "old loose default incorrectly grouped dissimilar forwarded photos")
+
+	// Invariant: with the fixed default (duplicateId-gated), no stack may form.
+	groups, err := StackBy(dissimilarForwarded, newDefault, "", "", logger)
+	require.NoError(t, err)
+	assert.Zero(t, len(groups), "dissimilar photos sent together must not be stacked (V8p5)")
+
+	// Positive control: photos sharing a duplicateId within 24h MUST stack.
+	similar := []utils.TAsset{
+		{ID: "5", OriginalFileName: "a.jpg", LocalDateTime: "2024-01-01T10:00:01Z", DuplicateID: "dup-123"},
+		{ID: "6", OriginalFileName: "b.jpg", LocalDateTime: "2024-01-01T10:00:02Z", DuplicateID: "dup-123"},
+	}
+	groups, err = StackBy(similar, newDefault, "", "", logger)
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(groups), "photos sharing duplicateId within 24h must stack (V8p5)")
+}
+
 /************************************************************************************************
 ** Test cases for time-based criteria matching with delta
 ************************************************************************************************/

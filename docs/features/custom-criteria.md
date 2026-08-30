@@ -97,6 +97,7 @@ You can use any of these keys in your criteria:
 | `fileCreatedAt`    | File creation time             |
 | `fileModifiedAt`   | File modification time         |
 | `updatedAt`        | Last update time               |
+| `duplicateId`      | Immich content-similarity ID   |
 
 ## Split Configuration
 

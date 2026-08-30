@@ -265,8 +265,8 @@ func TestFileLoggingPermissionFallback(t *testing.T) {
 	}{
 		{
 			name:        "invalid directory permissions",
-			logFile:     "/root/cannot-write-here/test.log",
-			description: "Should gracefully handle unwritable directory",
+			logFile:     "/dev/null/test.log",
+			description: "Should gracefully handle invalid parent path",
 		},
 		{
 			name:        "invalid file path",

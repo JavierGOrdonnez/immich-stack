@@ -71,6 +71,7 @@ type TAsset struct {
 	IsOffline        bool    `json:"isOffline"`        // Whether asset is offline
 	IsTrashed        bool    `json:"isTrashed"`        // Whether asset is trashed
 	OwnerID          string  `json:"ownerId"`          // Owner identifier
+	DuplicateID      string  `json:"duplicateId"`      // Immich content-similarity duplicate identifier
 	Type             string  `json:"type"`             // Asset type
 	UpdatedAt        string  `json:"updatedAt"`        // Last update time
 	Checksum         string  `json:"checksum"`         // File checksum

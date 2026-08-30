@@ -14,6 +14,7 @@ var extractors = map[string]func(asset utils.TAsset, c utils.TCriteria) (string,
 	"id":            func(a utils.TAsset, _ utils.TCriteria) (string, error) { return a.ID, nil },
 	"deviceAssetId": func(a utils.TAsset, _ utils.TCriteria) (string, error) { return a.DeviceAssetID, nil },
 	"deviceId":      func(a utils.TAsset, _ utils.TCriteria) (string, error) { return a.DeviceID, nil },
+	"duplicateId":   func(a utils.TAsset, _ utils.TCriteria) (string, error) { return a.DuplicateID, nil },
 	"duration":      func(a utils.TAsset, _ utils.TCriteria) (string, error) { return a.Duration, nil },
 	"fileCreatedAt": func(a utils.TAsset, c utils.TCriteria) (string, error) {
 		return extractTimeWithDelta(a.FileCreatedAt, c.Delta)
