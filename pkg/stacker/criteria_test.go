@@ -240,10 +240,17 @@ func TestDuplicateIdExtractorAndGrouping(t *testing.T) {
 	assert.Len(t, groups, 0)
 }
 
-// defaultDuplicateCriteria is the production default CRITERIA: ALL time-based grouping
-// is gated on a real content-similarity signal (duplicateId). There must be no
-// time-only branch keyed on loose filename prefixes. See §V8p5.
-const defaultDuplicateCriteria = `{"mode":"advanced","expression":{"operator":"AND","children":[{"criteria":{"key":"duplicateId"}},{"criteria":{"key":"localDateTime","delta":{"milliseconds":86400000}}}]}}`
+// defaultDuplicateCriteria is the production default CRITERIA:
+// an OR of
+//   1. duplicateId AND localDateTime ≤ 24h   (Immich content-similarity grouping)
+//   2. checksum                              (byte-identical files, no AI needed)
+// ALL time-based grouping is gated on a real content-similarity signal (duplicateId);
+// there is no time-only branch keyed on loose filename prefixes (see §V8p5).
+// The checksum branch is content-identity, not time-based, so it satisfies §V8p5
+// without a duplicateId gate. The duplicateId branch MUST precede the checksum
+// branch: every asset carries a checksum, so a leading checksum branch would
+// shadow duplicateId grouping entirely (see §V9kz).
+const defaultDuplicateCriteria = `{"mode":"advanced","expression":{"operator":"OR","children":[{"operator":"AND","children":[{"criteria":{"key":"duplicateId"}},{"criteria":{"key":"localDateTime","delta":{"milliseconds":86400000}}}]},{"criteria":{"key":"checksum"}}]}}`
 
 /************************************************************************************************
 ** TestV8p5_DissimilarForwardedNotStacked
@@ -288,6 +295,77 @@ func TestV8p5_DissimilarForwardedNotStacked(t *testing.T) {
 	groups, err = StackBy(similar, newDefault, "", "", logger)
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(groups), "photos sharing duplicateId within 24h must stack (V8p5)")
+}
+
+/************************************************************************************************
+** TestV9kz_ExactChecksumDuplicatesStacked
+** Invariant §V9kz: the default CRITERIA ORs a duplicateId-gated time branch with a checksum
+** branch, so byte-identical files stack even when Immich never tagged them with a
+** duplicateId (e.g. P1090535.JPG == "2016 Lisboa 2016.JPG", shared MD5). No AI required.
+************************************************************************************************/
+func TestV9kz_ExactChecksumDuplicatesStacked(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+
+	newDefault := defaultDuplicateCriteria
+
+	identical := []utils.TAsset{
+		{ID: "1", OriginalFileName: "2015-2020/P1090535.JPG", Checksum: "fab6595a7a1ae5473904de8c75fcd5ed", LocalDateTime: "2016-06-01T12:00:00Z", DuplicateID: ""},
+		{ID: "2", OriginalFileName: "2016 Lisboa 2016.JPG", Checksum: "fab6595a7a1ae5473904de8c75fcd5ed", LocalDateTime: "2015-12-31T00:00:00Z", DuplicateID: ""},
+	}
+	groups, err := StackBy(identical, newDefault, "", "", logger)
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(groups), "byte-identical files must stack via checksum (V9kz)")
+	if len(groups) == 1 {
+		assert.Len(t, groups[0], 2)
+	}
+
+	// A re-encoded near-identical copy (different checksum) with no duplicateId must NOT stack
+	// via checksum — it has a distinct checksum and no Immich similarity signal. It becomes
+	// a singleton. This keeps checksum grouping strictly byte-identity (V8p5-safe).
+	reEncoded := []utils.TAsset{
+		identical[0],
+		{ID: "3", OriginalFileName: "2016 Lisboa 2016 2.JPG", Checksum: "7e3b85d76df2234822662ce7effaeeae", LocalDateTime: "2016-06-01T12:00:01Z", DuplicateID: ""},
+	}
+	groups, err = StackBy(reEncoded, newDefault, "", "", logger)
+	require.NoError(t, err)
+	assert.Equal(t, 0, len(groups), "distinct-checksum files with no duplicateId must not stack (V9kz)")
+}
+
+/************************************************************************************************
+** TestV9kz_ChecksumDoesNotShadowDuplicateId
+** Invariant §V9kz: the duplicateId branch must precede the checksum branch. Similar-but-not-
+** identical photos sharing a duplicateId within 24h must still stack, and a leading checksum
+** branch must not swallow them (every asset has a checksum, so branch order is load-bearing).
+************************************************************************************************/
+func TestV9kz_ChecksumDoesNotShadowDuplicateId(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+
+	newDefault := defaultDuplicateCriteria
+
+	similar := []utils.TAsset{
+		{ID: "1", OriginalFileName: "a.jpg", Checksum: "checksum-A", DuplicateID: "dup-123", LocalDateTime: "2024-01-01T10:00:01Z"},
+		{ID: "2", OriginalFileName: "b.jpg", Checksum: "checksum-B", DuplicateID: "dup-123", LocalDateTime: "2024-01-01T10:00:02Z"},
+	}
+	groups, err := StackBy(similar, newDefault, "", "", logger)
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(groups), "similar photos sharing duplicateId within 24h must still stack (V9kz)")
+
+	// A byte-identical twin of 'a' (same checksum, no duplicateId) must NOT be stolen by the
+	// duplicateId group through branch shadowing; it stays in its own checksum group. This locks
+	// the branch order: duplicateId first, checksum second.
+	mixed := []utils.TAsset{
+		similar[0],
+		similar[1],
+		{ID: "3", OriginalFileName: "c.jpg", Checksum: "checksum-A", DuplicateID: "", LocalDateTime: "2024-01-01T10:00:03Z"},
+	}
+	groups, err = StackBy(mixed, newDefault, "", "", logger)
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(groups), "duplicateId stack and singleton copy must not merge (V9kz branch order)")
+	if len(groups) == 1 {
+		assert.Len(t, groups[0], 2, "only the duplicateId pair belongs to the stack")
+	}
 }
 
 /************************************************************************************************

@@ -98,6 +98,7 @@ You can use any of these keys in your criteria:
 | `fileModifiedAt`   | File modification time         |
 | `updatedAt`        | Last update time               |
 | `duplicateId`      | Immich content-similarity ID   |
+| `checksum`         | Immich file checksum (byte-identity) |
 
 ## Split Configuration
 
